@@ -1,104 +1,150 @@
 package ru.strebkov;
 
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerHTTP {
-    protected static final Integer PORT = 9999;
-    protected static ExecutorService executorService = Executors.newFixedThreadPool(64);
+
+    protected static ExecutorService executorService;
     protected static final List<String> validPaths = List.of("/index.html", "/spring.svg", "/spring.png",
             "/styles.css", "/app.js", "/links.html", "/forms.html",
             "/classic.html", "/events.html", "/events.js");
 
+    private  ConcurrentHashMap<String, Map<String, Handler>> handlers;
+//    private Map<String, Handler> handlerMap;
+
     static Socket socket;
 
+    public ServerHTTP(int numberOfThreads) {
+        executorService = Executors.newFixedThreadPool(numberOfThreads);
+    }
 
-    public void startServer() {
-        try (final var serverSocket = new ServerSocket(PORT)) {
+
+    public void startServer(int port) {
+        try (final var serverSocket = new ServerSocket(port)) {
+            System.out.println("Сервер работает");
             while (true) {
                 socket = serverSocket.accept();
                 executorService.submit(() -> processTheRequest(socket));
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            executorService.shutdown();
         }
     }
 
-    public void processTheRequest(Socket socket) {
-        while (true) {
-            try (
-                 final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                 final var out = new BufferedOutputStream(socket.getOutputStream());//
-            ) {
-                // must be in form GET /path HTTP/1.1
-                final var requestLine = in.readLine();
-                if (requestLine == null) continue;
+    public void processTheRequest(Socket socket)  {
+        try (final var in = new BufferedInputStream(socket.getInputStream());
+             final var out = new BufferedOutputStream(socket.getOutputStream())) {
 
-                final var parts = requestLine.split(" ");
-                if (parts.length != 3) {
-                    continue;
-                }
-
-                final var path = parts[1]; // GET /path HTTP/1.1 = массив [ 0;1;2]
-                if (!validPaths.contains(path)) {
-                    out.write((
-                            "HTTP/1.1 404 Not Found\r\n" +
-                                    "Content-Length: 0\r\n" +
-                                    "Connection: close\r\n" +
-                                    "\r\n"
-                    ).getBytes());
-                    out.flush();
-                    continue;
-                }
-
-                final var filePath = Path.of(".", "public", path);
-                final var mimeType = Files.probeContentType(filePath);// получаем тип файла= "text/plain";
-
-                // special case for classic
-                 if (path.equals("/classic.html")) {
-                     final var template = Files.readString(filePath);
-                     final var content = template.replace(
-                             "{time}",
-                             LocalDateTime.now().toString()
-                     ).getBytes();
-                     out.write((
-                             "HTTP/1.1 200 OK\r\n" +
-                                     "Content-Type: " + mimeType + "\r\n" +
-                                     "Content-Length: " + content.length + "\r\n" +
-                                     "Connection: close\r\n" +
-                                     "\r\n"
-                     ).getBytes());
-                     out.write(content);
-                     out.flush();
-                     continue;
-                 }
-
-                final var length = Files.size(filePath);
-                out.write((
-                        "HTTP/1.1 200 OK\r\n" +
-                                "Content-Type: " + mimeType + "\r\n" +
-                                "Content-Length: " + length + "\r\n" +
-                                "Connection: close\r\n" +
-                                "\r\n"
-                ).getBytes());
-                Files.copy(filePath, out); // копируем файл по байтам в выходной поток
-                out.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
+            Request request = Request.createRequest(in);
+            // Проверка  неправильного запроса и разорвать соединение.
+            if (request == null || !handlers.containsKey(request.getMethod())) {
+                responseWithoutContent(out, "400", "Bad request");
+                return;
             }
+            else {
+                // Распечатать  информацию по запросу
+                printRequestDebug(request);
+            }
+
+            Map<String, Handler> handlerMap = handlers.get(request.getMethod());
+            String requestPath = request.getPath().split("\\?")[0];
+            if (handlerMap.containsKey(requestPath)) {
+                Handler handler = handlerMap.get(requestPath);
+                handler.handle(request, out);
+            } else {
+                if (!validPaths.contains(requestPath)) {
+                    responseWithoutContent(out, "404", "Not found");
+                } else {
+                    defaultHandler(out, requestPath);
+                }
+            }
+        } catch (IOException | URISyntaxException e) {
+            throw new RuntimeException(e);
         }
+    }
+
+    private void printRequestDebug(Request request) {
+        System.out.println("Request debug information: ");
+        System.out.println("METHOD: " + request.getMethod());
+        System.out.println("PATH: " + request.getPath());
+        System.out.println("HEADERS: " + request.getHeaders());
+
+        System.out.println("Query Params: ");
+        for (var para : request.getQueryParams()) {
+            System.out.println(para.getName() + " = " + para.getValue());
+        }
+        System.out.println("Test for dumb param name: ");
+        System.out.println(request.getQueryParam("YetAnotherDumb").getName());
+        System.out.println("Test for dumb  param  name-value: ");
+        System.out.println(request.getQueryParam("testDebugInfo").getValue());
+    }
+
+    void defaultHandler(BufferedOutputStream out, String path) throws IOException {
+        final var filePath = Path.of(".", "public", path);
+        final var mimeType = Files.probeContentType(filePath);
+
+        // special case for classic
+        if (path.startsWith("/classic.html")) {
+            final var template = Files.readString(filePath);
+            final var content = template.replace(
+                    "{time}",
+                    LocalDateTime.now().toString()
+            ).getBytes();
+            out.write((
+                    "HTTP/1.1 200 OK\r\n" +
+                            "Content-Type: " + mimeType + "\r\n" +
+                            "Content-Length: " + content.length + "\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n"
+            ).getBytes());
+            out.write(content);
+            out.flush();
+            return;
+        }
+
+        final var length = Files.size(filePath);
+        out.write((
+                "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: " + mimeType + "\r\n" +
+                        "Content-Length: " + length + "\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+        ).getBytes());
+        Files.copy(filePath, out);
+        out.flush();
+    }
+
+
+    protected void responseWithoutContent(BufferedOutputStream out, String responseCode, String responseStatus) throws IOException {
+        out.write((
+                "HTTP/1.1 " + responseCode + " " + responseStatus + "\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+        ).getBytes());
+        out.flush();
+    }
+
+    protected void addHandler(String method, String path, Handler handler) {
+        if (!handlers.containsKey(method)) {
+            handlers.put(method, new HashMap<>());
+        }
+        handlers.get(method).put(path, handler);
     }
 }
-
 
 
