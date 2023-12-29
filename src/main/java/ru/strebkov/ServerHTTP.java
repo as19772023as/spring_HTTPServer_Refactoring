@@ -15,23 +15,24 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerHTTP {
+    protected final int port;
 
     protected static ExecutorService executorService;
     protected static final List<String> validPaths = List.of("/index.html", "/spring.svg", "/spring.png",
             "/styles.css", "/app.js", "/links.html", "/forms.html",
             "/classic.html", "/events.html", "/events.js");
-
-    private  ConcurrentHashMap<String, Map<String, Handler>> handlers;
-//    private Map<String, Handler> handlerMap;
-
+    private ConcurrentHashMap<String, Map<String, Handler>> handlers;
     static Socket socket;
 
-    public ServerHTTP(int numberOfThreads) {
+
+    public ServerHTTP(int port, int numberOfThreads) {
         executorService = Executors.newFixedThreadPool(numberOfThreads);
+        handlers = new ConcurrentHashMap<>();
+        this.port = port;
     }
 
 
-    public void startServer(int port) {
+    public void startServer() {
         try (final var serverSocket = new ServerSocket(port)) {
             System.out.println("Сервер работает");
             while (true) {
@@ -45,7 +46,7 @@ public class ServerHTTP {
         }
     }
 
-    public void processTheRequest(Socket socket)  {
+    public void processTheRequest(Socket socket) {
         try (final var in = new BufferedInputStream(socket.getInputStream());
              final var out = new BufferedOutputStream(socket.getOutputStream())) {
 
@@ -54,8 +55,7 @@ public class ServerHTTP {
             if (request == null || !handlers.containsKey(request.getMethod())) {
                 responseWithoutContent(out, "400", "Bad request");
                 return;
-            }
-            else {
+            } else {
                 // Распечатать  информацию по запросу
                 printRequestDebug(request);
             }
