@@ -3,7 +3,6 @@ package ru.strebkov;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -16,7 +15,6 @@ import java.util.concurrent.Executors;
 
 public class ServerHTTP {
     protected final int port;
-
     protected static ExecutorService executorService;
     protected static final List<String> validPaths = List.of("/index.html", "/spring.svg", "/spring.png",
             "/styles.css", "/app.js", "/links.html", "/forms.html",
@@ -40,57 +38,52 @@ public class ServerHTTP {
                 executorService.submit(() -> processTheRequest(socket));
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException(e);
         } finally {
             executorService.shutdown();
         }
     }
 
     public void processTheRequest(Socket socket) {
-        try (final var in = new BufferedInputStream(socket.getInputStream());
+        try (final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              final var out = new BufferedOutputStream(socket.getOutputStream())) {
 
-            Request request = Request.createRequest(in);
-            // Проверка  неправильного запроса и разорвать соединение.
-            if (request == null || !handlers.containsKey(request.getMethod())) {
-                responseWithoutContent(out, "400", "Bad request");
+            // read only request line for simplicity
+            // must be in form GET /path HTTP/1.1
+            final var requestLine = in.readLine();
+            final var parts = requestLine.split(" ");
+
+            if (parts.length != 3) {
                 return;
-            } else {
-                // Распечатать  информацию по запросу
-                printRequestDebug(request);
             }
 
+            String method = parts[0];
+            final var path = parts[1];
+            Request request = createRequest(method, path);
+
+            // Check for bad requests and drop connection
+            if (request == null || !handlers.containsKey(request.getMethod())) {
+                responseWithoutContent(out, "400", "Bad Request");
+                return;
+            }
+            // Get PATH, HANDLER Map
             Map<String, Handler> handlerMap = handlers.get(request.getMethod());
-            String requestPath = request.getPath().split("\\?")[0];
+            String requestPath = request.getPath();
+            System.out.println(handlerMap);
             if (handlerMap.containsKey(requestPath)) {
                 Handler handler = handlerMap.get(requestPath);
                 handler.handle(request, out);
             } else {
-                if (!validPaths.contains(requestPath)) {
-                    responseWithoutContent(out, "404", "Not found");
+                // Resource not found
+                if (!validPaths.contains(request.getPath())) {
+                    responseWithoutContent(out, "404", "Not Found");
                 } else {
-                    defaultHandler(out, requestPath);
+                    defaultHandler(out, path);
                 }
             }
-        } catch (IOException | URISyntaxException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private void printRequestDebug(Request request) {
-        System.out.println("Request debug information: ");
-        System.out.println("METHOD: " + request.getMethod());
-        System.out.println("PATH: " + request.getPath());
-        System.out.println("HEADERS: " + request.getHeaders());
-
-        System.out.println("Query Params: ");
-        for (var para : request.getQueryParams()) {
-            System.out.println(para.getName() + " = " + para.getValue());
-        }
-        System.out.println("Test for dumb param name: ");
-        System.out.println(request.getQueryParam("YetAnotherDumb").getName());
-        System.out.println("Test for dumb  param  name-value: ");
-        System.out.println(request.getQueryParam("testDebugInfo").getValue());
     }
 
     void defaultHandler(BufferedOutputStream out, String path) throws IOException {
@@ -98,7 +91,7 @@ public class ServerHTTP {
         final var mimeType = Files.probeContentType(filePath);
 
         // special case for classic
-        if (path.startsWith("/classic.html")) {
+        if (path.equals("/classic.html")) {
             final var template = Files.readString(filePath);
             final var content = template.replace(
                     "{time}",
@@ -115,7 +108,6 @@ public class ServerHTTP {
             out.flush();
             return;
         }
-
         final var length = Files.size(filePath);
         out.write((
                 "HTTP/1.1 200 OK\r\n" +
@@ -128,8 +120,22 @@ public class ServerHTTP {
         out.flush();
     }
 
+    private Request createRequest(String method, String path) {
+        if (method != null && !method.isBlank()) {
+            return new Request(method, path);
+        } else {
+            return null;
+        }
+    }
 
-    protected void responseWithoutContent(BufferedOutputStream out, String responseCode, String responseStatus) throws IOException {
+    void addHandler(String method, String path, Handler handler) {
+        if (!handlers.containsKey(method)) {
+            handlers.put(method, new HashMap<>());
+        }
+        handlers.get(method).put(path, handler);
+    }
+
+    void responseWithoutContent(BufferedOutputStream out, String responseCode, String responseStatus) throws IOException {
         out.write((
                 "HTTP/1.1 " + responseCode + " " + responseStatus + "\r\n" +
                         "Content-Length: 0\r\n" +
@@ -137,13 +143,6 @@ public class ServerHTTP {
                         "\r\n"
         ).getBytes());
         out.flush();
-    }
-
-    protected void addHandler(String method, String path, Handler handler) {
-        if (!handlers.containsKey(method)) {
-            handlers.put(method, new HashMap<>());
-        }
-        handlers.get(method).put(path, handler);
     }
 }
 
