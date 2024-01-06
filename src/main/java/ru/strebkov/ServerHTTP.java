@@ -3,6 +3,7 @@ package ru.strebkov;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -20,6 +21,7 @@ public class ServerHTTP {
             "/styles.css", "/app.js", "/links.html", "/forms.html",
             "/classic.html", "/events.html", "/events.js");
     private ConcurrentHashMap<String, Map<String, Handler>> handlers;
+
     static Socket socket;
 
 
@@ -28,7 +30,6 @@ public class ServerHTTP {
         handlers = new ConcurrentHashMap<>();
         this.port = port;
     }
-
 
     public void startServer() {
         try (final var serverSocket = new ServerSocket(port)) {
@@ -45,21 +46,10 @@ public class ServerHTTP {
     }
 
     public void processTheRequest(Socket socket) {
-        try (final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        try (final var in = new BufferedInputStream(socket.getInputStream());
              final var out = new BufferedOutputStream(socket.getOutputStream())) {
 
-            // read only request line for simplicity
-            // must be in form GET /path HTTP/1.1
-            final var requestLine = in.readLine();
-            final var parts = requestLine.split(" ");
-
-            if (parts.length != 3) {
-                return;
-            }
-
-            String method = parts[0];
-            final var path = parts[1];
-            Request request = createRequest(method, path);
+            Request request = Request.createRequest(in, out);
 
             // Check for bad requests and drop connection
             if (request == null || !handlers.containsKey(request.getMethod())) {
@@ -68,8 +58,8 @@ public class ServerHTTP {
             }
             // Get PATH, HANDLER Map
             Map<String, Handler> handlerMap = handlers.get(request.getMethod());
-            String requestPath = request.getPath();
-            System.out.println(handlerMap);
+            String requestPath = request.getPath().split("\\?")[0];
+
             if (handlerMap.containsKey(requestPath)) {
                 Handler handler = handlerMap.get(requestPath);
                 handler.handle(request, out);
@@ -78,10 +68,13 @@ public class ServerHTTP {
                 if (!validPaths.contains(request.getPath())) {
                     responseWithoutContent(out, "404", "Not Found");
                 } else {
-                    defaultHandler(out, path);
+                    printRequestDebug(request);
+                    defaultHandler(out, requestPath);
                 }
             }
         } catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (URISyntaxException e) {
             throw new RuntimeException(e);
         }
     }
@@ -120,14 +113,6 @@ public class ServerHTTP {
         out.flush();
     }
 
-    private Request createRequest(String method, String path) {
-        if (method != null && !method.isBlank()) {
-            return new Request(method, path);
-        } else {
-            return null;
-        }
-    }
-
     void addHandler(String method, String path, Handler handler) {
         if (!handlers.containsKey(method)) {
             handlers.put(method, new HashMap<>());
@@ -143,6 +128,18 @@ public class ServerHTTP {
                         "\r\n"
         ).getBytes());
         out.flush();
+    }
+
+    private void printRequestDebug(Request request) {
+        System.out.println("Request debug information:\n " +
+                "METHOD: " + request.getMethod() +
+                "\nPATH: " + request.getPath() +
+                "\nHEADERS: " + request.getHeaders() +
+                "\nQUERY PARAMS: ");
+
+        for (var para : request.getParams()) {
+            System.out.println(para.getName() + " = " + para.getValue());
+        }
     }
 }
 
