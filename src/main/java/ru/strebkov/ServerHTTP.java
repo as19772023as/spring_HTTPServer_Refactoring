@@ -51,6 +51,10 @@ public class ServerHTTP {
 
             Request request = Request.createRequest(in, out);
 
+            //"http://localhost:9999/?value=get-value"
+            request.getPostParam("value"); // должен выдать - get-value
+            request.getQueryParam("value"); // должен выдать - get-value
+
             // Check for bad requests and drop connection
             if (request == null || !handlers.containsKey(request.getMethod())) {
                 responseWithoutContent(out, "400", "Bad Request");

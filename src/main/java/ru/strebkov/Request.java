@@ -23,6 +23,7 @@ public class Request {
     private final List<NameValuePair> params;
     private static int markAndByteLimit = 4096;
 
+    private static String bodyPost;
 
     public Request(String method, String path, List<String> headers, List<NameValuePair> params) {
         this.method = method;
@@ -114,6 +115,8 @@ public class Request {
         System.out.println(headers);
         List<NameValuePair> params = URLEncodedUtils.parse(new URI(path), String.valueOf(StandardCharsets.UTF_8));
 
+        bodyPost = getPostBody(in, method, headersDelimiter, headers);
+
         return new Request(method, path, headers, params);
     }
 
@@ -140,5 +143,58 @@ public class Request {
         ).getBytes());
         out.flush();
     }
+
+    public static String getPostBody(BufferedInputStream in, String method, byte[] headersDelimiter, List<String> headers) throws IOException {
+        if (!method.equals(GET)) {
+            in.skip(headersDelimiter.length);
+            // вычитываем Content-Length, чтобы прочитать body
+            final var contentLength = extractHeader(headers, "Content-Length");
+            final var contentType = extractHeader(headers, "Content-Type");
+            if (contentLength.isPresent() && contentType.equals("application/x-www-form-urlencoded")) {
+                final var length = Integer.parseInt(contentLength.get());
+                final byte[] bodyBytes;
+                bodyBytes = in.readNBytes(length);
+                final var body = new String(bodyBytes);
+                System.out.println(body);
+                return body;
+            }
+        }
+        return null;
+    }
+
+    private static Optional<String> extractHeader(List<String> headers, String header) {
+        return headers.stream()
+                .filter(o -> o.startsWith(header))
+                .map(o -> o.substring(o.indexOf(" ")))
+                .map(String::trim)
+                .findFirst();
+    }
+
+    public List<NameValuePair> getPostParams() {
+        List<NameValuePair> bodyList = null;
+        try {
+            bodyList = URLEncodedUtils.parse(new URI(bodyPost), String.valueOf(StandardCharsets.UTF_8));
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+        return bodyList;
+    }
+
+    public NameValuePair getPostParam(String name) {
+        return getPostParams().stream()
+                .filter(param -> param.getName().equalsIgnoreCase(name))
+                .findFirst().orElse(new NameValuePair() {
+                    @Override
+                    public String getName() {
+                        return null;
+                    }
+
+                    @Override
+                    public String getValue() {
+                        return null;
+                    }
+                });
+    }
+
 
 }
