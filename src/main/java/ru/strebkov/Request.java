@@ -1,10 +1,17 @@
 package ru.strebkov;
 
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.FileUploadException;
+import org.apache.commons.fileupload.RequestContext;
+import org.apache.commons.fileupload.disk.DiskFileItemFactory;
+import org.apache.commons.fileupload.servlet.ServletFileUpload;
+import org.apache.commons.io.FileUtils;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.File;
 import java.io.IOException;
 
 import java.net.URI;
@@ -20,16 +27,16 @@ public class Request {
     public static final String GET = "GET";
     public static final String POST = "POST";
     private final List<String> headers;
-    private final List<NameValuePair> params;
+    private final List<NameValuePair> quaryparams;
     private static int markAndByteLimit = 4096;
 
     private static String bodyPost;
 
-    public Request(String method, String path, List<String> headers, List<NameValuePair> params) {
+    public Request(String method, String path, List<String> headers, List<NameValuePair> quaryparams) {
         this.method = method;
         this.path = path;
         this.headers = headers;
-        this.params = params;
+        this.quaryparams = quaryparams;
     }
 
     public String getMethod() {
@@ -44,12 +51,13 @@ public class Request {
         return headers;
     }
 
-    public List<NameValuePair> getParams() {
-        return params;
+    public List<NameValuePair> getQuaryParams() {
+        return quaryparams;
     }
 
+
     public NameValuePair getQueryParam(String name) {
-        return getParams().stream()
+        return getQuaryParams().stream()
                 .filter(param -> param.getName().equalsIgnoreCase(name))
                 .findFirst().orElse(new NameValuePair() {
                     @Override
@@ -64,7 +72,7 @@ public class Request {
                 });
     }
 
-    static Request createRequest(BufferedInputStream in, BufferedOutputStream out) throws IOException, URISyntaxException {
+   static Request createRequest(BufferedInputStream in, BufferedOutputStream out) throws IOException, URISyntaxException {
         final List<String> allowedMethods = List.of(GET, POST);
         in.mark(markAndByteLimit);
         final var buffer = new byte[markAndByteLimit];
@@ -158,6 +166,9 @@ public class Request {
                 System.out.println(body);
                 return body;
             }
+            if (contentType.equals("multipart/form-data")){
+                getParts();
+            }
         }
         return null;
     }
@@ -170,7 +181,7 @@ public class Request {
                 .findFirst();
     }
 
-    public List<NameValuePair> getPostParams() {
+    public static List<NameValuePair> getPostParams() {
         List<NameValuePair> bodyList = null;
         try {
             bodyList = URLEncodedUtils.parse(new URI(bodyPost), String.valueOf(StandardCharsets.UTF_8));
@@ -180,7 +191,7 @@ public class Request {
         return bodyList;
     }
 
-    public NameValuePair getPostParam(String name) {
+    public static NameValuePair getPostParam(String name) {
         return getPostParams().stream()
                 .filter(param -> param.getName().equalsIgnoreCase(name))
                 .findFirst().orElse(new NameValuePair() {
@@ -196,5 +207,47 @@ public class Request {
                 });
     }
 
+    public static List<FileItem> getParts() {
+        DiskFileItemFactory diskFileIF = new DiskFileItemFactory();
+        diskFileIF.setRepository(new File("c:/a"));
+        diskFileIF.setSizeThreshold(1024 * 8);
 
+        ServletFileUpload upload = new ServletFileUpload(diskFileIF);
+        upload.setHeaderEncoding("UTF-8");
+        upload.setFileSizeMax(1024 * 1024 * 5);
+        upload.setSizeMax(1024 * 1024 * 10);
+
+        Request request = (Request) getPostParams();
+
+        List<FileItem> list = null;
+        try {
+            list = upload.parseRequest((RequestContext) request);// parse
+        } catch (FileUploadException e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+
+    public  static List<String> getPart(String name) {
+        List<String> listFile = new ArrayList<>();
+        String fileName;
+
+        try {
+            for (FileItem fileItem : getParts()) {
+                if (fileItem.isFormField()) {
+                    String onlyText = fileItem.getString("UTF-8");
+                    System.err.println("Description is:" + onlyText);
+                } else {
+                    fileName = fileItem.getName();
+                    fileName = fileName.substring(fileName.lastIndexOf("\\") + 1);//Parse file name
+                    if (fileName.equals(name)) {
+                        listFile.add(fileName);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return listFile;
+    }
 }

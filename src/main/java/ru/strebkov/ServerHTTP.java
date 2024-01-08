@@ -54,6 +54,7 @@ public class ServerHTTP {
             //"http://localhost:9999/?value=get-value"
             request.getPostParam("value"); // должен выдать - get-value
             request.getQueryParam("value"); // должен выдать - get-value
+            Request.getPart("name");
 
             // Check for bad requests and drop connection
             if (request == null || !handlers.containsKey(request.getMethod())) {
@@ -141,7 +142,7 @@ public class ServerHTTP {
                 "\nHEADERS: " + request.getHeaders() +
                 "\nQUERY PARAMS: ");
 
-        for (var para : request.getParams()) {
+        for (var para : request.getQuaryParams()) {
             System.out.println(para.getName() + " = " + para.getValue());
         }
     }
