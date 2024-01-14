@@ -14,24 +14,37 @@ public class Main {
     protected static final int PORT = 9999;
 
     public static void main(String[] args) {
-        final var serverHTTP = new ServerHTTP(PORT, numberOfThreads);
+        final var serverTest = new ExampleHttpServer(PORT, numberOfThreads);
 
-        serverHTTP.addHandler("GET", "/messages", ((request, responseStream) ->
+        serverTest.addHandler("GET", "/messages", ((request, responseStream) ->
                 RequestProcessor.responseWithoutContent(responseStream, HttpStatus.SC_NOT_FOUND, "Not found...")));
 
-        serverHTTP.addHandler("POST", "", ((request, responseStream) ->
+        serverTest.addHandler("POST", "/messages", ((request, responseStream) ->
                 RequestProcessor.responseWithoutContent(responseStream, 503, "Service Unavailable")));
-             //   defaultHandler(responseStream, "/classic.html")));
 
-        serverHTTP.addHandler("GET", "/", ((request, responseStream) ->
-                defaultHandler(responseStream, "/classic.html")));
+        //   Доступные файлы для примера "/index.html", "/spring.svg", "/spring.png",
+        //   "/styles.css", "/app.js", "/links.html", "/forms.html",
+        //  "/classic.html", "/events.html", "/events.js"
+        serverTest.addHandler("GET", "/index.html", ((request, responseStream) ->
+                defaultHandler(responseStream, "/index.html")));
 
-        serverHTTP.startServer();
+        serverTest.startServer();
     }
 
     static void defaultHandler(BufferedOutputStream out, String path) throws IOException {
         final var filePath = Path.of(".", "public", path);
         final var mimeType = Files.probeContentType(filePath);
+
+        if (mimeType == null) {
+            out.write((
+                    "HTTP/1.1 404 Not Found\r\n" +
+                            "Content-Length: 0\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n"
+            ).getBytes());
+            out.flush();
+            return;
+        }
 
         // special case for classic
         if (path.equals("/classic.html")) {

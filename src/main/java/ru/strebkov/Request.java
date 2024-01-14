@@ -30,7 +30,6 @@ public class Request {
     }
 
     public static Request parse(BufferedReader in) throws IOException {
-        // read only request line for simplicity
         // must be in form GET /path HTTP/1.1
         final var requestLine = in.readLine();
         final var parts = requestLine.split(" ");
@@ -40,7 +39,7 @@ public class Request {
         }
 
         String method = parts[0];
-        if ((method == null || method.isBlank()) && !method.equals(listMethod)) {
+        if (!listMethod.contains(method)) {
             return null;
         }
         final var path = parts[1];
