@@ -6,7 +6,7 @@ public class Main {
         int port = 9999;
         int poolSizeThreads = 64;
 
-        ServerHTTP serverHTTP = new ServerHTTP(port, poolSizeThreads);
-            serverHTTP.startServer();
+        ExampleHttpServer httpServer = new ExampleHttpServer(port, poolSizeThreads);
+            httpServer.startServer();
     }
 }
